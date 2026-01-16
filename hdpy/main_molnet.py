@@ -7,6 +7,7 @@
 ################################################################################
 from cProfile import run
 import torch
+print(f"PyTorch is using {torch.get_num_threads()} thread(s)")
 import numpy as np
 import pickle
 import random

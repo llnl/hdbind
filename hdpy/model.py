@@ -42,6 +42,7 @@ class HDModel(nn.Module):
         bipolarize_am=False,
         binarize_hv=False,
         bipolarize_hv=False,
+        device="cpu",
         #TODO: store the device?
     ):
         super(HDModel, self).__init__()
@@ -59,6 +60,7 @@ class HDModel(nn.Module):
 
         self.D = D
         self.sim_metric = sim_metric
+        self.device = device
 
 
     def check_am(self):
@@ -166,7 +168,7 @@ class HDModel(nn.Module):
         #TODO: remove the cuda call and use the device instead
         starter.record()
         sims = torchmetrics.functional.pairwise_cosine_similarity(
-            hvs.clone().float().cuda(), self.am.clone().float().cuda()
+            hvs.clone().float().to(self.device), self.am.clone().float().to(self.device)
         )
         eta = (sims[:, 1] - sims[:, 0]) * (1 / 4)
         eta = torch.add(eta, (1 / 2)).reshape(-1)
@@ -198,6 +200,7 @@ class RPEncoder(HDModel):
         bipolarize_am=False,
         binarize_hv=False,
         bipolarize_hv=True,
+        device="cpu",
     ):
         super(RPEncoder, self).__init__(
             D=D,
@@ -206,6 +209,7 @@ class RPEncoder(HDModel):
             bipolarize_am=bipolarize_am,
             binarize_hv=binarize_hv,
             bipolarize_hv=bipolarize_hv,
+            device=device,
         )
 
         self.rp_layer = nn.Linear(input_size, D, bias=False).float()
@@ -231,6 +235,7 @@ class RPEncoder(HDModel):
         self.bipolarize_am = bipolarize_am
         self.binarize_hv = binarize_hv
         self.bipolarize_hv = bipolarize_hv
+        self.device = device
 
     def encode(self, x, return_time=False):
         starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(
@@ -273,6 +278,7 @@ class ComboEncoder(HDModel):
         bipolarize_am=False,
         binarize_hv=False,
         bipolarize_hv=False,
+        device="cpu",
     ):
         super(ComboEncoder, self).__init__(
             D=D,
@@ -281,6 +287,7 @@ class ComboEncoder(HDModel):
             bipolarize_am=bipolarize_am,
             binarize_hv=binarize_hv,
             bipolarize_hv=bipolarize_hv,
+            device=device,
         )
         self.rp_layer = nn.Linear(input_size, D, bias=False).float()
         init_rp_mat = (
@@ -532,6 +539,7 @@ def train_hdc(model, train_dataloader, device, num_epochs, encode=True):
             am_time_cpu_end = time.perf_counter()
 
             am_time_cpu_sum += am_time_cpu_end - am_time_cpu_start
+            print(am_time_cpu_sum)
             am_time_cuda_sum += (
                 cuda_starter.elapsed_time(cuda_ender) / 1000
             )  # convert elapsed time in milliseconds to seconds
@@ -840,16 +848,16 @@ def run_hdc(
         persistent_workers=True if num_workers >1 else False,
         shuffle=True,
         collate_fn=collate_fn,
-        pin_memory=True,
+        pin_memory=True if "cuda" in model.device else False,
     )
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=batch_size,
-        num_workers=8,
+        num_workers=0,
         persistent_workers=False,
         shuffle=False,
         collate_fn=collate_fn,
-        pin_memory=True,
+        pin_memory=True if "cuda" in model.device else False,
     )
 
     if result_dict is None or result_dict == {}:
@@ -862,7 +870,7 @@ def run_hdc(
     for i in range(comp_trial_ct, n_trials):
         trial_dict = {}
 
-        # this should force each call of .fit to be different...I think..
+        # this should force each call of .fit to be different
         seed_rngs(random_state + i)
 
         # model, learning_curve, single_pass_train_time, retrain_time, _ = train_hdc(
@@ -971,6 +979,9 @@ def run_hdc(
         result_dict["trials"][i] = trial_dict
         print(f"saving trial {i} to {result_path}")
         torch.save(result_dict, result_path)
+
+
+    print(torch.cuda.memory_summary())
 
     return result_dict
 
@@ -1189,6 +1200,7 @@ def ray_mlp_job(params, device, train_dataloader, val_dataloader):
     # hyperopt_cuda_starter.record()
     
     model = MLPClassifier(**params)
+    model.to(device)
 
     train_dict = train_mlp(
         model=model, train_dataloader=train_dataloader, epochs=5, device=device
@@ -1302,7 +1314,7 @@ def run_mlp(
         train_dataset,
         batch_size=batch_size,
         num_workers=num_workers,
-        persistent_workers=True,
+        persistent_workers=True if num_workers > 1 else False,
         # shuffle=True,#mutually exclusive with SubsetRandomSampler
         sampler=train_sampler,
     )
@@ -1310,7 +1322,7 @@ def run_mlp(
     val_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        num_workers=1,
+        num_workers=0,
         persistent_workers=False,
         # shuffle=False, #mutually exclusive with SubsetRandomSampler
         sampler=val_sampler,
@@ -1319,7 +1331,7 @@ def run_mlp(
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=batch_size,
-        num_workers=1,
+        num_workers=0,
         persistent_workers=False,
         shuffle=False,
     )
@@ -1340,7 +1352,7 @@ def run_mlp(
                 val_dataloader=val_dataloader,
             ),
             # resources={"cpu": 4, "gpu": 1},
-            resources={"gpu": 1},
+            resources={"gpu": 1, "cpu": 1},
         ),
         tune_config=tune.TuneConfig(
             metric="loss",
@@ -1517,6 +1529,7 @@ def run_mlp(
         )
         result_dict["trials"][i] = trial_dict
 
+    print(torch.cuda.memory_summary())
     return result_dict
 
 
@@ -1535,6 +1548,7 @@ def get_model(config):
             bipolarize_hv=config.bipolarize_hv,
             binarize_am=config.binarize_am,
             bipolarize_am=config.bipolarize_am,
+            device=config.device,
         )
         # will update item_mem after processing input data
 
@@ -1548,6 +1562,7 @@ def get_model(config):
             bipolarize_am=config.bipolarize_am,
             binarize_hv=config.binarize_hv,
             bipolarize_hv=config.bipolarize_hv,
+            device=config.device,
         )
 
     elif config.model == "ecfp":
@@ -1561,6 +1576,7 @@ def get_model(config):
             bipolarize_am=config.bipolarize_am,
             binarize_hv=config.binarize_hv,
             bipolarize_hv=config.bipolarize_hv,
+            device=config.device,
         )
 
     elif config.model == "rp":
@@ -1575,6 +1591,7 @@ def get_model(config):
             bipolarize_am=config.bipolarize_am,
             binarize_hv=config.binarize_hv,
             bipolarize_hv=config.bipolarize_hv,
+            device=config.device,
         )
 
     elif config.model == "mlp-small":
@@ -1603,8 +1620,9 @@ def get_model(config):
             bipolarize_am=config.bipolarize_am,
             binarize_hv=config.binarize_hv,
             bipolarize_hv=config.bipolarize_hv,
+            device=config.device
         )
-        model.am = torch.zeros(2, model.D, dtype=float)
+        model.am = torch.zeros(2, model.D, dtype=float).to(config.device)
 
         if config.binarize_am:
             model.am = binarize(model.am)
@@ -1622,6 +1640,7 @@ def get_model(config):
             bipolarize_am=config.bipolarize_am,
             binarize_hv=config.binarize_hv,
             bipolarize_hv=config.bipolarize_hv,
+            device=config.device
         )
     elif config.model == "logistic":
         model = LogisticRegression(solver="liblinear", penalty="l2")

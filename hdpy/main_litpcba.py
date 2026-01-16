@@ -7,8 +7,9 @@
 ################################################################################
 from cProfile import run
 import torch
+print(f"PyTorch is using {torch.get_num_threads()} thread(s)")
 import random
-
+from hdpy.utils import seed_rngs
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
@@ -72,36 +73,57 @@ def main(
         x_train, y_train = train_dataset.fps, train_dataset.labels
         x_test, y_test = test_dataset.fps, test_dataset.labels
 
-        model.fit(X=x_train, y=y_train)
-
-        y_ = model.predict(X=x_test)
-        scores = model.predict_proba(X=x_test)
+        result_dict = {"trials": {}}
 
 
 
-        # import pdb
-        # pdb.set_trace()
-        class_report = classification_report(y_true=y_test, y_pred=y_)
-        roc_auc = roc_auc_score(y_score=scores[:,1], y_true=y_test) 
-        roc_enrich_1 = compute_roc_enrichment(scores=scores[:,1], labels=y_test, fpr_thresh=.01)
-        enrich_1 = compute_enrichment_factor(scores=scores[:,1], labels=y_test, n_percent=.01)
-        enrich_10 = compute_enrichment_factor(scores=scores[:,1], labels=y_test, n_percent=.1)
+        for i in range(args.n_trials):
+            print(f"{args.config} trial {i}")
+            seed = args.random_state + i
+            # this should force each call of .fit to be different..
+            seed_rngs(seed)
 
-        result_dict = {
-            "trials": {
-                    0:
-                        {
-                            "y_true": y_test, 
-                            "y_pred": y_, 
-                            "y_score": scores,
-                            "class_report": class_report, 
-                            "roc-auc": roc_auc,
-                            "er-1": roc_enrich_1,
-                            "enrich-1": enrich_1,
-                            "enrich-10": enrich_10,
-                        }
-                    }
-        }
+            model.fit(X=x_train, y=y_train)
+
+            y_ = model.predict(X=x_test)
+            scores = model.predict_proba(X=x_test)
+
+
+
+            # import pdb
+            # pdb.set_trace()
+            class_report = classification_report(y_true=y_test, y_pred=y_)
+            roc_auc = roc_auc_score(y_score=scores[:,1], y_true=y_test) 
+            roc_enrich_1 = compute_roc_enrichment(scores=scores[:,1], labels=y_test, fpr_thresh=.01)
+            enrich_1 = compute_enrichment_factor(scores=scores[:,1], labels=y_test, n_percent=.01)
+            enrich_10 = compute_enrichment_factor(scores=scores[:,1], labels=y_test, n_percent=.1)
+            
+            result_dict["trials"][i] = {
+                                "y_true": y_test, 
+                                "y_pred": y_, 
+                                "y_score": scores,
+                                "class_report": class_report, 
+                                "roc-auc": roc_auc,
+                                "er-1": roc_enrich_1,
+                                "enrich-1": enrich_1,
+                                "enrich-10": enrich_10,
+                            }
+            
+            # result_dict = {
+                # "trials": {
+                        # 0:
+                            # {
+                                # "y_true": y_test, 
+                                # "y_pred": y_, 
+                                # "y_score": scores,
+                                # "class_report": class_report, 
+                                # "roc-auc": roc_auc,
+                                # "er-1": roc_enrich_1,
+                                # "enrich-1": enrich_1,
+                                # "enrich-10": enrich_10,
+                            # }
+                        # }
+            # }
 
 
     else:

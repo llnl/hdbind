@@ -4,7 +4,7 @@ ecfp_length: 1024
 ecfp_radius: 1 
 ngram_order:
 D:
-device: cuda
+device: cuda:0
 binarize_am: False
 binarize_hv: False
 bipolarize_am: False

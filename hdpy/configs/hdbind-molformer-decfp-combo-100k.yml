@@ -10,3 +10,4 @@ binarize_am: False
 binarize_hv: False
 bipolarize_am: False
 bipolarize_hv: True
+num_workers: 0 
